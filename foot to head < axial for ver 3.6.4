@@ -1,0 +1,163 @@
+# foot to head << axial
+import bpy
+
+#Enter DICOM data information 
+pixel_pitch = 
+pixel = 
+ax_slide_number = 
+ax_slide_distance = 
+
+#paste folder path of JPEG image data
+path_JPEG = 
+
+size = 0.02
+
+class ImageSliderOperator(bpy.types.Operator):
+    bl_idname = "object.image_slider_operator"
+    bl_label = "Image Slider Operator"
+
+    def execute(self, context):
+        path_CT = path_JPEG + '//'
+        axis_type = context.scene.image_slider_axis
+        slider_value = int(context.scene.image_slider_property)
+
+        # Common scale
+        common_scale = size * pixel_pitch * pixel / 5
+
+        if axis_type == 'AX':  # Axial
+            ax_slides = ax_slide_number
+            image_path = path_CT + 'A/A' + str(slider_value) + '.jpg'
+            ax_distance = ax_slide_distance
+            
+            # Delete the existing image object
+            for obj in bpy.context.scene.objects:
+                if obj.name.startswith("iA"):
+                    bpy.data.objects.remove(obj, do_unlink=True)
+
+            # Load the image
+            bpy.ops.object.load_reference_image(filepath=image_path)
+            
+            # Obtain the object
+            image_obj = bpy.context.object
+
+            # Reset rotation and position
+            image_obj.rotation_euler = (1.5708, 0, 0)
+            image_obj.location = (0, -(ax_distance * size) * ((ax_slides + 1) / 2 - slider_value), 0)
+
+            # Resize
+            image_obj.scale = (common_scale, common_scale, 1)
+
+            # Rename the object
+            bpy.context.object.name = "iA" + str(slider_value)
+        
+        elif axis_type == 'COR':  # Coronal
+            cor_slides = pixel
+            image_path = path_CT + 'C/C' + str(slider_value) + '.jpg'
+            
+            # Delete the existing image object
+            for obj in bpy.context.scene.objects:
+                if obj.name.startswith("iC"):
+                    bpy.data.objects.remove(obj, do_unlink=True)
+
+            # Load the image
+            bpy.ops.object.load_reference_image(filepath=image_path)
+
+            # Obtain the object
+            image_obj = bpy.context.object
+
+            # Reset rotation and position
+            image_obj.rotation_euler = (3.1416, 0, 0)
+            image_obj.location = (0, 0, (pixel_pitch * size) * (cor_slides / 2 + 0.5 - slider_value))
+            
+            
+
+            # Resize
+            image_obj.scale = (common_scale, common_scale, 1)
+
+            # Rename the object
+            bpy.context.object.name = "iC" + str(slider_value)
+        
+        elif axis_type == 'SAG':  # Sagittal
+            sag_slides = pixel
+            image_path = path_CT + 'S/S' + str(slider_value) + '.jpg'
+            
+            # Delete the existing image object
+            for obj in bpy.context.scene.objects:
+                if obj.name.startswith("iS"):
+                    bpy.data.objects.remove(obj, do_unlink=True)
+
+            # Load the image
+            bpy.ops.object.load_reference_image(filepath=image_path)
+
+            # Obtain the object
+            image_obj = bpy.context.object
+
+            # Reset rotation and position
+            image_obj.rotation_euler = (0, 1.5708, 3.1416)
+            image_obj.location = (-(pixel_pitch * size) * (sag_slides / 2 + 0.5 - slider_value), 0, 0)
+
+            # Resize
+            image_obj.scale = (common_scale, common_scale, 1)
+
+            # Rename the object
+            bpy.context.object.name = "iS" + str(slider_value)
+        
+        return {'FINISHED'}
+
+class ImageSliderPanel(bpy.types.Panel):
+    bl_label = "Image Slider Panel"
+    bl_idname = "OBJECT_PT_image_slider"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Image Slider'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(context.scene, 'image_slider_axis', expand=True)
+
+        # Ensure image_slider_property exists before accessing it
+        if not hasattr(context.scene, "image_slider_property"):
+            update_slider_axis(self, context)  # Call update to initialize property
+
+        # Prop slider directly, adjusting max based on selected axis
+        max_value = ax_slide_number if context.scene.image_slider_axis == 'AX' else pixel
+        layout.prop(context.scene, 'image_slider_property', text="Slide", slider=True)
+        context.scene.image_slider_property = min(context.scene.image_slider_property, max_value)  # Adjust to max
+
+def update_slider_axis(self, context):
+    # Remove existing image_slider_property if it exists, then re-add it
+    if "image_slider_property" in context.scene:
+        del context.scene["image_slider_property"]
+
+    max_value = ax_slide_number if context.scene.image_slider_axis == 'AX' else pixel
+    bpy.types.Scene.image_slider_property = bpy.props.IntProperty(
+        name="Slide", min=1, max=max_value, default=1, update=update_slider
+    )
+
+def update_slider(self, context):
+    bpy.ops.object.image_slider_operator()
+
+def register():
+    bpy.utils.register_class(ImageSliderOperator)
+    bpy.utils.register_class(ImageSliderPanel)
+    bpy.types.Scene.image_slider_axis = bpy.props.EnumProperty(
+        name="Axis",
+        items=[
+            ('AX', 'Axial', 'Axial slices'),
+            ('COR', 'Coronal', 'Coronal slices'),
+            ('SAG', 'Sagittal', 'Sagittal slices')
+        ],
+        default='AX',
+        update=update_slider_axis
+    )
+    update_slider_axis(None, bpy.context)  # Initialize image_slider_property
+
+def unregister():
+    bpy.utils.unregister_class(ImageSliderOperator)
+    bpy.utils.unregister_class(ImageSliderPanel)
+    if "image_slider_property" in bpy.types.Scene:
+        del bpy.types.Scene.image_slider_property
+    del bpy.types.Scene.image_slider_axis
+
+if __name__ == "__main__":
+    register()
