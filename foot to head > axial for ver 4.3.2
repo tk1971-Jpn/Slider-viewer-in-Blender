@@ -1,11 +1,11 @@
 import bpy
 
-pixel_pitch = 0.810547
+pixel_pitch = 0.546875
 pixel = 512
 size = 0.02
-ax_slide_number = 591
-ax_slide_distance = 1.25
-folder_path = '/Users/tkimura/Desktop/Blender/TCIA/manifest-1705406030205/JPEG_FULL'
+ax_slide_number = 262
+ax_slide_distance = 2
+folder_path = '/Users/tkimura/Desktop/manifest-1738053134245'
 
 def load_reference_image(image_path, object_name):
     """
@@ -87,9 +87,9 @@ class ImageSliderOperator(bpy.types.Operator):
             image_obj.scale = (size_cor, size_cor, size_cor)
 
         elif axis_type == 'SAG':  # Sagittal: Same as Coronal (Slide along Z-axis, rotation along Y-axis)
-            sag_slides = 512
+            sag_slides = pixel
             image_path = path_CT + 'S/S' + str(slider_value) + '.jpg'
-            size_sag = 591 * 1.25 / 50
+            size_sag = ax_slide_number * ax_slide_distance * size
 
             # Remove existing image objects
             for obj in bpy.context.scene.objects:
@@ -124,13 +124,36 @@ class ImageSliderPanel(bpy.types.Panel):
         layout.prop(context.scene, 'image_slider_axis', expand=True)  # Axis selection
         layout.prop(context.scene, 'image_slider_property', slider=True)  # Slider
 
+def update_axis(self, context):
+    """
+    Update the slider's maximum value dynamically when the axis is changed.
+    """
+    if context.scene.image_slider_axis == 'AX':
+        bpy.types.Scene.image_slider_property = bpy.props.IntProperty(
+            name="Slide",
+            min=1,
+            max=ax_slide_number,
+            default=1,
+            update=update_slider
+        )
+    elif context.scene.image_slider_axis in ['COR', 'SAG']:
+        bpy.types.Scene.image_slider_property = bpy.props.IntProperty(
+            name="Slide",
+            min=1,
+            max=pixel,
+            default=1,
+            update=update_slider
+        )
+
+    # Refresh the UI to reflect the changes
+    bpy.context.scene.update()
+
 def update_slider(self, context):
     bpy.ops.object.image_slider_operator()
 
 def register():
     bpy.utils.register_class(ImageSliderOperator)
     bpy.utils.register_class(ImageSliderPanel)
-    bpy.types.Scene.image_slider_property = bpy.props.IntProperty(name="Slide", min=1, max=591, default=1, update=update_slider)
     bpy.types.Scene.image_slider_axis = bpy.props.EnumProperty(
         name="Axis",
         items=[
@@ -138,7 +161,16 @@ def register():
             ('COR', 'Coronal', 'Coronal slices'),
             ('SAG', 'Sagittal', 'Sagittal slices')
         ],
-        default='AX'
+        default='AX',
+        update=update_axis
+    )
+    # Initialize the slider property
+    bpy.types.Scene.image_slider_property = bpy.props.IntProperty(
+        name="Slide",
+        min=1,
+        max=ax_slide_number,
+        default=1,
+        update=update_slider
     )
 
 def unregister():
