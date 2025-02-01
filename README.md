@@ -2,7 +2,7 @@
 
 <img width="612" alt="slider" src="https://github.com/user-attachments/assets/874d13d7-40a9-4622-86c1-c06f8d79a9e9" />
 
-Four scripts for each Blender version are prepared based on the arrangement of the DICOM data (from head to foot or foot to head) and the relative lengths of the head-foot direction and the horizontal direction (head-foot direction is longer or the horizontal direction is longer). Choose the appropriate script according to these conditions, as well as the Python version.
+**Note:** Please prepare MPR images in JPEG format from DICOM data in advance using [tk1971-Jpn/DICOM-to-JPEG](https://github.com/tk1971-Jpn/DICOM-to-JPEG).
 
 1. Launch Blender
 2. Select the Scripting mode and click the "New Text" button (the icon with two overlapping documents) to enable the creation of a new script.
