@@ -7,7 +7,7 @@ DEFAULT_AX_COUNT = 419       # Number of axial (Z-direction) slices
 DEFAULT_AX_SPACING = 2.0     # Spacing between axial slices (relative units)
 DEFAULT_PITCH = 0.683        # In-plane pixel pitch (e.g., mm/pixel)
 DEFAULT_SIZE = 0.02          # Global scaling factor
-DEFAULT_FOLDER = '/Users/tkimura/Desktop/Image data/260484 IPMN /PNG'  # Contains axial/coronal/sagittal subfolders
+DEFAULT_FOLDER = ''  # Contains axial/coronal/sagittal subfolders
 
 def ensure_props():
     """Initialize and register custom Scene properties"""
