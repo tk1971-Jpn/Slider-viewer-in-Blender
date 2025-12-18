@@ -1,0 +1,298 @@
+import bpy
+import os
+
+# ====== Default values (modifiable from the UI) ======
+DEFAULT_PIXEL = 512          # Image dimension (used for COR/SAG slider max)
+DEFAULT_AX_COUNT = 419       # Number of axial (Z-direction) slices
+DEFAULT_AX_SPACING = 2.0     # Spacing between axial slices (relative units)
+DEFAULT_PITCH = 0.683        # In-plane pixel pitch (e.g., mm/pixel)
+DEFAULT_SIZE = 0.02          # Global scaling factor
+DEFAULT_FOLDER = ''          # Contains axial/coronal/sagittal subfolders
+
+# ★追加：MRI表示のYオフセット（Blender units）
+DEFAULT_MRI_Y_OFFSET = 0.0   # 初期値
+MRI_Y_OFFSET_RANGE = 5.0     # スライダーの可動範囲（±）
+
+# ------------------------------------------------------
+
+def load_reference_image(image_path, object_name):
+    """Load an image as an Empty (Image) and assign the specified name"""
+    try:
+        img = bpy.data.images.load(image_path, check_existing=True)
+    except Exception as e:
+        print(f"Failed to load image: {image_path}, Error: {e}")
+        return None
+
+    bpy.ops.object.add(type='EMPTY', location=(0, 0, 0))
+    empty_obj = bpy.context.object
+    empty_obj.empty_display_type = 'IMAGE'
+    empty_obj.data = img
+    empty_obj.name = object_name
+    return empty_obj
+
+def compute_scales(ctx):
+    """Recalculate and return size (scaling factors)"""
+    ax_count = ctx.scene.ax_slice_count
+    ax_spacing = ctx.scene.slice_spacing_ax
+    pixel_pitch = ctx.scene.pixel_pitch
+    pixel = ctx.scene.pixel
+    size = DEFAULT_SIZE
+
+    cc_scale = ax_count * ax_spacing * size
+    ax_scale = size * pixel_pitch * pixel
+    common_scale = cc_scale if (pixel_pitch * pixel) < (ax_count * ax_spacing) else ax_scale
+    return ax_scale, common_scale
+
+def remove_objects_with_prefix(prefix):
+    """Remove existing image empties with a given prefix"""
+    for obj in list(bpy.context.scene.objects):
+        if obj.name.startswith(prefix):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+# ---------- Update callbacks ----------
+def update_axis(self, context):
+    """Update the slider's maximum value when the axis or parameters change"""
+    # max depends on axis
+    if context.scene.image_slider_axis == 'AX':
+        maxv = max(1, context.scene.ax_slice_count)
+    else:
+        maxv = max(1, context.scene.pixel)
+
+    # Re-declare the property to update its maximum value
+    bpy.types.Scene.image_slider_property = bpy.props.IntProperty(
+        name="Slide",
+        min=1,
+        max=maxv,
+        default=min(getattr(context.scene, 'image_slider_property', 1), maxv),
+        update=update_slider
+    )
+
+    # Refresh viewport
+    for area in bpy.context.window.screen.areas:
+        if area.type == 'VIEW_3D':
+            area.tag_redraw()
+
+def update_slider(self, context):
+    bpy.ops.object.image_slider_operator()
+
+def update_params(self, context):
+    """When parameters change, refresh current slice"""
+    update_axis(self, context)
+    bpy.ops.object.image_slider_operator()
+
+def update_mri_offset(self, context):
+    """When MRI Y-offset slider moves, refresh current slice"""
+    bpy.ops.object.image_slider_operator()
+
+# ---------- Property registration ----------
+def ensure_props():
+    """Initialize and register custom Scene properties"""
+    S = bpy.types.Scene
+
+    if not hasattr(S, "image_slider_axis"):
+        S.image_slider_axis = bpy.props.EnumProperty(
+            name="Axis",
+            items=[
+                ('AX', 'Axial', 'Axial slices'),
+                ('COR', 'Coronal', 'Coronal slices'),
+                ('SAG', 'Sagittal', 'Sagittal slices')
+            ],
+            default='AX',
+            update=update_axis
+        )
+
+    if not hasattr(S, "image_slider_property"):
+        S.image_slider_property = bpy.props.IntProperty(
+            name="Slide",
+            min=1, max=DEFAULT_AX_COUNT, default=1, update=update_slider
+        )
+
+    # Adjustable parameters (accessible from UI)
+    if not hasattr(S, "ax_slice_count"):
+        S.ax_slice_count = bpy.props.IntProperty(
+            name="AX Slices (Z)",
+            min=1, max=100000, default=DEFAULT_AX_COUNT,
+            description="Number of axial slices (Z direction)",
+            update=update_params
+        )
+
+    if not hasattr(S, "slice_spacing_ax"):
+        S.slice_spacing_ax = bpy.props.FloatProperty(
+            name="AX Slice Spacing",
+            min=0.0, soft_max=100.0, default=DEFAULT_AX_SPACING,
+            description="Spacing between axial slices (relative units)",
+            update=update_params
+        )
+
+    if not hasattr(S, "pixel_pitch"):
+        S.pixel_pitch = bpy.props.FloatProperty(
+            name="Pixel Pitch",
+            min=0.0, soft_max=10.0, default=DEFAULT_PITCH,
+            description="In-plane pixel pitch (e.g., mm/pixel)",
+            update=update_params
+        )
+
+    if not hasattr(S, "pixel"):
+        S.pixel = bpy.props.IntProperty(
+            name="Image Pixel (XY)",
+            min=1, max=16384, default=DEFAULT_PIXEL,
+            description="Image resolution used for COR/SAG slider max",
+            update=update_params
+        )
+
+    if not hasattr(S, "folder_path_png"):
+        S.folder_path_png = bpy.props.StringProperty(
+            name="Parent Folder",
+            subtype='DIR_PATH',
+            default=DEFAULT_FOLDER,
+            description="Folder containing axial/coronal/sagittal subfolders"
+        )
+
+    # ★追加：MRI表示位置のYオフセット
+    if not hasattr(S, "mri_y_offset"):
+        S.mri_y_offset = bpy.props.FloatProperty(
+            name="MRI Y Offset",
+            description="Translate displayed PNG planes along Blender Y-axis (for alignment)",
+            default=DEFAULT_MRI_Y_OFFSET,
+            min=-MRI_Y_OFFSET_RANGE,
+            max= MRI_Y_OFFSET_RANGE,
+            step=1,
+            precision=4,
+            update=update_mri_offset
+        )
+
+# ---------- Operator ----------
+class ImageSliderOperator(bpy.types.Operator):
+    bl_idname = "object.image_slider_operator"
+    bl_label = "Image Slider Operator"
+
+    def execute(self, context):
+        axis_type = context.scene.image_slider_axis
+        slider_value = context.scene.image_slider_property
+        folder_path = bpy.path.abspath(context.scene.folder_path_png)
+
+        pixel_pitch = context.scene.pixel_pitch
+        pixel = context.scene.pixel
+        ax_slides = context.scene.ax_slice_count
+        ax_distance = context.scene.slice_spacing_ax
+
+        # ★追加：MRI Yオフセット（Blender unit）
+        y_offset = context.scene.mri_y_offset
+
+        ax_scale, common_scale = compute_scales(context)
+
+        # ファイル名：001.png 形式（必要ならここを 0001 に変更してください）
+        fname = f"{slider_value:03d}.png"
+
+        if axis_type == 'AX':      # Axial (slides along Y-axis)
+            subdir = 'axial'
+            prefix = 'iAx'
+            image_path = os.path.join(folder_path, subdir, fname)
+
+            remove_objects_with_prefix(prefix)
+
+            image_obj = load_reference_image(image_path, f"{prefix}{slider_value:03d}")
+            if not image_obj:
+                return {'CANCELLED'}
+
+            image_obj.rotation_euler = (1.5708, 0, 0)
+
+            # Translate along Y-axis (equivalent to medical Z) + ★Y offset
+            base_y = -(ax_distance / 50) * ((ax_slides + 1) / 2 - slider_value)
+            image_obj.location = (0, base_y + y_offset, 0)
+
+            image_obj.scale = (ax_scale, ax_scale, ax_scale)
+
+        elif axis_type == 'COR':   # Coronal (slides along Z-axis)
+            subdir = 'coronal'
+            prefix = 'iCor'
+            image_path = os.path.join(folder_path, subdir, fname)
+
+            remove_objects_with_prefix(prefix)
+
+            image_obj = load_reference_image(image_path, f"{prefix}{slider_value:03d}")
+            if not image_obj:
+                return {'CANCELLED'}
+
+            image_obj.rotation_euler = (0, 3.14159, 3.14159)
+
+            zloc = (pixel_pitch / 50) * (pixel / 2 + 0.5 - slider_value)
+            image_obj.location = (0, 0 + y_offset, zloc)  # ★Y offset
+
+            image_obj.scale = (common_scale, common_scale, common_scale)
+
+        elif axis_type == 'SAG':   # Sagittal (slides along X-axis)
+            subdir = 'sagittal'
+            prefix = 'iSag'
+            image_path = os.path.join(folder_path, subdir, fname)
+
+            remove_objects_with_prefix(prefix)
+
+            image_obj = load_reference_image(image_path, f"{prefix}{slider_value:03d}")
+            if not image_obj:
+                return {'CANCELLED'}
+
+            image_obj.rotation_euler = (0, 1.5708, 3.14159)
+
+            xloc = -(pixel_pitch / 50) * (pixel / 2 + 0.5 - slider_value)
+            image_obj.location = (xloc, 0 + y_offset, 0)  # ★Y offset
+
+            image_obj.scale = (common_scale, common_scale, common_scale)
+
+        return {'FINISHED'}
+
+# ---------- UI Panel ----------
+class ImageSliderPanel(bpy.types.Panel):
+    bl_label = "Image Slider Panel"
+    bl_idname = "OBJECT_PT_image_slider"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Image Slider'
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+
+        col.prop(context.scene, 'folder_path_png')
+        col.prop(context.scene, 'image_slider_axis', expand=True)
+        col.prop(context.scene, 'image_slider_property', slider=True)
+
+        layout.separator()
+        col2 = layout.column(align=True)
+        col2.label(text="Parameters")
+        col2.prop(context.scene, 'ax_slice_count')
+        col2.prop(context.scene, 'slice_spacing_ax')
+        col2.prop(context.scene, 'pixel_pitch')
+        col2.prop(context.scene, 'pixel')
+
+        layout.separator()
+        col3 = layout.column(align=True)
+        col3.label(text="Alignment (MRI)")
+        col3.prop(context.scene, 'mri_y_offset', slider=True)
+
+# ---------- register / unregister ----------
+classes = (
+    ImageSliderOperator,
+    ImageSliderPanel,
+)
+
+def register():
+    ensure_props()
+    for c in classes:
+        bpy.utils.register_class(c)
+
+def unregister():
+    for c in reversed(classes):
+        bpy.utils.unregister_class(c)
+
+    S = bpy.types.Scene
+    for attr in (
+        "image_slider_axis", "image_slider_property",
+        "ax_slice_count", "slice_spacing_ax", "pixel_pitch", "pixel",
+        "folder_path_png", "mri_y_offset"
+    ):
+        if hasattr(S, attr):
+            delattr(S, attr)
+
+if __name__ == "__main__":
+    register()
